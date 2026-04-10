@@ -51,7 +51,6 @@ for col in text_cols:
         df[col] = df[col].fillna("Unknown").astype(str).str.strip()
         df.loc[df[col] == "", col] = "Unknown"
 
-# Keep only usable rows
 if "Competitor" in df.columns:
     df = df[df["Competitor"].notna()]
 if "Price per month" in df.columns:
@@ -161,26 +160,7 @@ if filtered.empty:
     st.warning("No rows match the selected channels.")
     st.stop()
 
-# 6. Plan name
-plan_options = (
-    sorted(filtered["Plan name"].dropna().astype(str).unique().tolist())
-    if "Plan name" in filtered.columns
-    else []
-)
-selected_plan_names = st.sidebar.multiselect(
-    "Plan name",
-    plan_options,
-    default=plan_options,
-)
-
-if selected_plan_names and "Plan name" in filtered.columns:
-    filtered = filtered[filtered["Plan name"].astype(str).isin(selected_plan_names)]
-
-if filtered.empty:
-    st.warning("No rows match the selected plan names.")
-    st.stop()
-
-# 7. Type
+# 6. Type
 type_options = (
     sorted(filtered["Type"].dropna().astype(str).unique().tolist())
     if "Type" in filtered.columns
@@ -199,9 +179,27 @@ if filtered.empty:
     st.warning("No rows match the selected types.")
     st.stop()
 
+# 7. Plan name
+plan_options = (
+    sorted(filtered["Plan name"].dropna().astype(str).unique().tolist())
+    if "Plan name" in filtered.columns
+    else []
+)
+selected_plan_names = st.sidebar.multiselect(
+    "Plan name",
+    plan_options,
+    default=plan_options,
+)
+
+if selected_plan_names and "Plan name" in filtered.columns:
+    filtered = filtered[filtered["Plan name"].astype(str).isin(selected_plan_names)]
+
+if filtered.empty:
+    st.warning("No rows match the selected plan names.")
+    st.stop()
+
 # -----------------------------
-# Smart label for trend lines
-# Only show what still varies after filters
+# Smart trend label
 # -----------------------------
 def build_trend_label(row: pd.Series, frame: pd.DataFrame) -> str:
     parts = []
@@ -237,7 +235,10 @@ with col1:
     st.metric("Visible rows", f"{len(filtered):,}")
 
 with col2:
-    st.metric("Visible competitors", filtered["Competitor"].nunique() if "Competitor" in filtered.columns else 0)
+    st.metric(
+        "Visible competitors",
+        filtered["Competitor"].nunique() if "Competitor" in filtered.columns else 0,
+    )
 
 with col3:
     st.metric("Lowest price / month", f"${filtered['Price per month'].min():.2f}")
@@ -284,8 +285,8 @@ with tab1:
                     {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
                     {"field": "Competitor", "type": "nominal"},
                     {"field": "Channel", "type": "nominal"},
-                    {"field": "Plan name", "type": "nominal"},
                     {"field": "Type", "type": "nominal"},
+                    {"field": "Plan name", "type": "nominal"},
                     {"field": "Length (in months)", "type": "quantitative"},
                     {"field": "Price per month", "type": "quantitative"},
                     {"field": "Total price", "type": "quantitative"},
@@ -372,8 +373,8 @@ with tab3:
                 {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
                 {"field": "Competitor", "type": "nominal"},
                 {"field": "Channel", "type": "nominal"},
-                {"field": "Plan name", "type": "nominal"},
                 {"field": "Type", "type": "nominal"},
+                {"field": "Plan name", "type": "nominal"},
                 {"field": "Length (in months)", "type": "quantitative"},
                 {"field": metric_choice, "type": "quantitative"},
             ],
@@ -456,8 +457,8 @@ with tab4:
                         {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
                         {"field": "Competitor", "type": "nominal"},
                         {"field": "Channel", "type": "nominal"},
-                        {"field": "Plan name", "type": "nominal"},
                         {"field": "Type", "type": "nominal"},
+                        {"field": "Plan name", "type": "nominal"},
                         {"field": "Length (in months)", "type": "quantitative"},
                         {"field": "Price per month", "type": "quantitative"},
                         {"field": "Total price", "type": "quantitative"},
