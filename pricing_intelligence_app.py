@@ -51,98 +51,24 @@ for col in text_cols:
         df[col] = df[col].fillna("Unknown").astype(str).str.strip()
         df.loc[df[col] == "", col] = "Unknown"
 
-df = df[df["Competitor"].notna()]
-df = df[df["Price per month"].notna()]
+# Keep only usable rows
+if "Competitor" in df.columns:
+    df = df[df["Competitor"].notna()]
+if "Price per month" in df.columns:
+    df = df[df["Price per month"].notna()]
 
 if df.empty:
     st.warning("No usable rows found in the Main sheet.")
     st.stop()
 
 # -----------------------------
-# Cascading filters
+# Sidebar filters in requested order
 # -----------------------------
 st.sidebar.header("Filters")
 
-base_df = df.copy()
+filtered = df.copy()
 
-# 1. Competitors
-competitor_options = sorted(base_df["Competitor"].dropna().unique().tolist())
-selected_competitors = st.sidebar.multiselect(
-    "Competitors",
-    competitor_options,
-    default=competitor_options,
-)
-
-step_df = base_df.copy()
-if selected_competitors:
-    step_df = step_df[step_df["Competitor"].isin(selected_competitors)]
-
-# 2. Channels
-channel_options = (
-    sorted(step_df["Channel"].dropna().unique().tolist())
-    if "Channel" in step_df.columns
-    else []
-)
-selected_channels = st.sidebar.multiselect(
-    "Channels",
-    channel_options,
-    default=channel_options,
-)
-
-if selected_channels and "Channel" in step_df.columns:
-    step_df = step_df[step_df["Channel"].isin(selected_channels)]
-
-# 3. Plan names
-plan_options = (
-    sorted(step_df["Plan name"].dropna().unique().tolist())
-    if "Plan name" in step_df.columns
-    else []
-)
-selected_plan_names = st.sidebar.multiselect(
-    "Plan names",
-    plan_options,
-    default=plan_options,
-)
-
-if selected_plan_names and "Plan name" in step_df.columns:
-    step_df = step_df[step_df["Plan name"].isin(selected_plan_names)]
-
-# 4. Types
-type_options = (
-    sorted(step_df["Type"].dropna().unique().tolist())
-    if "Type" in step_df.columns
-    else []
-)
-selected_types = st.sidebar.multiselect(
-    "Types",
-    type_options,
-    default=type_options,
-)
-
-if selected_types and "Type" in step_df.columns:
-    step_df = step_df[step_df["Type"].isin(selected_types)]
-
-# 5. Lengths
-length_options = []
-if "Length (in months)" in step_df.columns:
-    length_options = sorted(
-        [int(x) for x in step_df["Length (in months)"].dropna().unique().tolist()]
-    )
-
-selected_month_lengths = st.sidebar.multiselect(
-    "Length (in months)",
-    length_options,
-    default=length_options,
-)
-
-if selected_month_lengths and "Length (in months)" in step_df.columns:
-    step_df = step_df[
-        step_df["Length (in months)"].fillna(-1).astype(int).isin(selected_month_lengths)
-    ]
-
-# 6. Date range with 2 calendar pickers
-filtered = step_df.copy()
-
+# 1. Start date / 2. End date
 if "Date" in filtered.columns and filtered["Date"].notna().any():
     min_date = filtered["Date"].min().date()
     max_date = filtered["Date"].max().date()
@@ -172,16 +98,115 @@ if "Date" in filtered.columns and filtered["Date"].notna().any():
     ]
 
 if filtered.empty:
-    st.warning("No rows match your filters.")
+    st.warning("No rows match the selected date range.")
+    st.stop()
+
+# 3. Competitor
+competitor_options = (
+    sorted(filtered["Competitor"].dropna().astype(str).unique().tolist())
+    if "Competitor" in filtered.columns
+    else []
+)
+selected_competitors = st.sidebar.multiselect(
+    "Competitor",
+    competitor_options,
+    default=competitor_options,
+)
+
+if selected_competitors and "Competitor" in filtered.columns:
+    filtered = filtered[filtered["Competitor"].astype(str).isin(selected_competitors)]
+
+if filtered.empty:
+    st.warning("No rows match the selected competitors.")
+    st.stop()
+
+# 4. Length
+length_options = []
+if "Length (in months)" in filtered.columns:
+    length_options = sorted(
+        [int(x) for x in filtered["Length (in months)"].dropna().unique().tolist()]
+    )
+
+selected_lengths = st.sidebar.multiselect(
+    "Length (in months)",
+    length_options,
+    default=length_options,
+)
+
+if selected_lengths and "Length (in months)" in filtered.columns:
+    filtered = filtered[
+        filtered["Length (in months)"].fillna(-1).astype(int).isin(selected_lengths)
+    ]
+
+if filtered.empty:
+    st.warning("No rows match the selected lengths.")
+    st.stop()
+
+# 5. Channel
+channel_options = (
+    sorted(filtered["Channel"].dropna().astype(str).unique().tolist())
+    if "Channel" in filtered.columns
+    else []
+)
+selected_channels = st.sidebar.multiselect(
+    "Channel",
+    channel_options,
+    default=channel_options,
+)
+
+if selected_channels and "Channel" in filtered.columns:
+    filtered = filtered[filtered["Channel"].astype(str).isin(selected_channels)]
+
+if filtered.empty:
+    st.warning("No rows match the selected channels.")
+    st.stop()
+
+# 6. Plan name
+plan_options = (
+    sorted(filtered["Plan name"].dropna().astype(str).unique().tolist())
+    if "Plan name" in filtered.columns
+    else []
+)
+selected_plan_names = st.sidebar.multiselect(
+    "Plan name",
+    plan_options,
+    default=plan_options,
+)
+
+if selected_plan_names and "Plan name" in filtered.columns:
+    filtered = filtered[filtered["Plan name"].astype(str).isin(selected_plan_names)]
+
+if filtered.empty:
+    st.warning("No rows match the selected plan names.")
+    st.stop()
+
+# 7. Type
+type_options = (
+    sorted(filtered["Type"].dropna().astype(str).unique().tolist())
+    if "Type" in filtered.columns
+    else []
+)
+selected_types = st.sidebar.multiselect(
+    "Type",
+    type_options,
+    default=type_options,
+)
+
+if selected_types and "Type" in filtered.columns:
+    filtered = filtered[filtered["Type"].astype(str).isin(selected_types)]
+
+if filtered.empty:
+    st.warning("No rows match the selected types.")
     st.stop()
 
 # -----------------------------
-# Smart trend label
+# Smart label for trend lines
+# Only show what still varies after filters
 # -----------------------------
 def build_trend_label(row: pd.Series, frame: pd.DataFrame) -> str:
     parts = []
 
-    if frame["Competitor"].nunique() > 1:
+    if "Competitor" in frame.columns and frame["Competitor"].nunique() > 1:
         parts.append(str(row["Competitor"]))
 
     if "Plan name" in frame.columns and frame["Plan name"].nunique() > 1:
@@ -212,7 +237,7 @@ with col1:
     st.metric("Visible rows", f"{len(filtered):,}")
 
 with col2:
-    st.metric("Visible competitors", filtered["Competitor"].nunique())
+    st.metric("Visible competitors", filtered["Competitor"].nunique() if "Competitor" in filtered.columns else 0)
 
 with col3:
     st.metric("Lowest price / month", f"${filtered['Price per month'].min():.2f}")
@@ -233,17 +258,15 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 with tab1:
     st.subheader("All visible price points by competitor")
 
-    scatter_df = filtered.copy()
-
     st.vega_lite_chart(
-        scatter_df,
+        filtered,
         {
             "mark": {"type": "circle", "size": 90, "opacity": 0.75},
             "encoding": {
                 "x": {
                     "field": "Competitor",
                     "type": "nominal",
-                    "sort": sorted(scatter_df["Competitor"].unique().tolist()),
+                    "sort": sorted(filtered["Competitor"].dropna().astype(str).unique().tolist()),
                     "title": "Competitor",
                     "axis": {"labelAngle": -35},
                 },
@@ -258,14 +281,14 @@ with tab1:
                     "legend": None,
                 },
                 "tooltip": [
+                    {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
                     {"field": "Competitor", "type": "nominal"},
-                    {"field": "Plan name", "type": "nominal"},
                     {"field": "Channel", "type": "nominal"},
+                    {"field": "Plan name", "type": "nominal"},
                     {"field": "Type", "type": "nominal"},
                     {"field": "Length (in months)", "type": "quantitative"},
                     {"field": "Price per month", "type": "quantitative"},
                     {"field": "Total price", "type": "quantitative"},
-                    {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
                 ],
             },
             "height": 500,
@@ -312,7 +335,7 @@ with tab3:
     if trend_df.empty:
         st.info("No valid Date / metric rows available for trend lines.")
     else:
-        available_labels = sorted(trend_df["Trend label"].unique().tolist())
+        available_labels = sorted(trend_df["Trend label"].dropna().astype(str).unique().tolist())
 
         selected_line_labels = st.multiselect(
             "Choose lines to display",
@@ -348,6 +371,7 @@ with tab3:
             "tooltip": [
                 {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
                 {"field": "Competitor", "type": "nominal"},
+                {"field": "Channel", "type": "nominal"},
                 {"field": "Plan name", "type": "nominal"},
                 {"field": "Type", "type": "nominal"},
                 {"field": "Length (in months)", "type": "quantitative"},
@@ -373,7 +397,8 @@ with tab3:
                 use_container_width=True,
             )
         else:
-            for comp in sorted(trend_df["Competitor"].dropna().unique().tolist()):
+            competitor_list = sorted(trend_df["Competitor"].dropna().astype(str).unique().tolist())
+            for comp in competitor_list:
                 comp_df = trend_df[trend_df["Competitor"] == comp].copy()
                 st.markdown(f"### {comp}")
 
@@ -430,8 +455,8 @@ with tab4:
                     "tooltip": [
                         {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
                         {"field": "Competitor", "type": "nominal"},
-                        {"field": "Plan name", "type": "nominal"},
                         {"field": "Channel", "type": "nominal"},
+                        {"field": "Plan name", "type": "nominal"},
                         {"field": "Type", "type": "nominal"},
                         {"field": "Length (in months)", "type": "quantitative"},
                         {"field": "Price per month", "type": "quantitative"},
@@ -448,14 +473,23 @@ with tab4:
 # -----------------------------
 with tab5:
     st.subheader("Raw filtered export")
-    export_df = filtered.copy()
+    st.dataframe(filtered, use_container_width=True)
 
-    st.dataframe(export_df, use_container_width=True)
-
-    csv_data = export_df.to_csv(index=False).encode("utf-8")
+    csv_data = filtered.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="Download filtered data as CSV",
         data=csv_data,
         file_name="pricing_filtered.csv",
         mime="text/csv",
+    )
+
+# -----------------------------
+# Data sanity note
+# -----------------------------
+with st.expander("Check column meaning"):
+    st.write(
+        "This app uses the Excel columns exactly as they appear in the Main sheet. "
+        "If values like Duo / Family / Individual are appearing under Plan name instead of Type, "
+        "that usually means the source rows in the Excel file are structured that way. "
+        "The next step would be to add a normalization rule for specific competitors if needed."
     )
