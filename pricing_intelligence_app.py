@@ -1,6 +1,5 @@
 import pandas as pd
 import streamlit as st
-import plotly.express as px
 
 st.set_page_config(page_title="Pricing Intelligence Tool", layout="wide")
 
@@ -26,20 +25,19 @@ if file is not None:
     if selected_competitors:
         filtered = filtered[filtered["Competitor"].isin(selected_competitors)]
 
-    st.subheader("All price points over time")
-
-    fig = px.scatter(
-        filtered,
-        x="Date",
-        y="Price per month",
-        color="Competitor",
-        hover_data=["Plan name", "Type", "Length (in months)"]
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.subheader("Raw data")
+    st.subheader("All price points")
     st.dataframe(filtered, use_container_width=True)
+
+    st.subheader("Price per month over time")
+    chart_df = filtered.copy()
+    chart_df["Date"] = pd.to_datetime(chart_df["Date"], errors="coerce")
+    chart_df = chart_df.dropna(subset=["Date", "Price per month"])
+    chart_df = chart_df.sort_values("Date")
+
+    if not chart_df.empty:
+        st.line_chart(chart_df.set_index("Date")["Price per month"])
+    else:
+        st.info("No valid Date / Price per month data to chart.")
 
 else:
     st.info("Please upload your Excel file to start.")
