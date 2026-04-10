@@ -18,11 +18,8 @@ if uploaded_file is None:
 # Load data
 # -----------------------------
 df = pd.read_excel(uploaded_file, sheet_name=MAIN_SHEET)
-
-# Clean column names just in case
 df.columns = [str(col).strip() for col in df.columns]
 
-# Convert types safely
 if "Date" in df.columns:
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
 
@@ -54,10 +51,8 @@ for col in text_cols:
         df[col] = df[col].fillna("Unknown").astype(str).str.strip()
         df.loc[df[col] == "", col] = "Unknown"
 
-# Keep only rows with a competitor and price point
-if "Competitor" in df.columns and "Price per month" in df.columns:
-    df = df[df["Competitor"].notna()]
-    df = df[df["Price per month"].notna()]
+df = df[df["Competitor"].notna()]
+df = df[df["Price per month"].notna()]
 
 if df.empty:
     st.warning("No usable rows found in the Main sheet.")
@@ -139,6 +134,34 @@ if filtered.empty:
     st.stop()
 
 # -----------------------------
+# Smart label builder
+# -----------------------------
+def build_smart_label(row, frame):
+    parts = []
+
+    if frame["Competitor"].nunique() > 1:
+        parts.append(str(row["Competitor"]))
+
+    if "Plan name" in frame.columns and frame["Plan name"].nunique() > 1:
+        parts.append(str(row["Plan name"]))
+
+    if "Type" in frame.columns and frame["Type"].nunique() > 1:
+        parts.append(str(row["Type"]))
+
+    if "Length (in months)" in frame.columns and frame["Length (in months)"].nunique() > 1:
+        try:
+            parts.append(f"{int(row['Length (in months)'])}m")
+        except Exception:
+            parts.append(str(row["Length (in months)"]))
+
+    if not parts:
+        return str(row["Competitor"])
+
+    return " | ".join(parts)
+
+filtered["Trend label"] = filtered.apply(lambda row: build_smart_label(row, filtered), axis=1)
+
+# -----------------------------
 # KPI cards
 # -----------------------------
 col1, col2, col3, col4 = st.columns(4)
@@ -150,18 +173,16 @@ with col2:
     st.metric("Visible competitors", filtered["Competitor"].nunique())
 
 with col3:
-    min_price = filtered["Price per month"].min()
-    st.metric("Lowest price / month", f"${min_price:.2f}")
+    st.metric("Lowest price / month", f"${filtered['Price per month'].min():.2f}")
 
 with col4:
-    max_price = filtered["Price per month"].max()
-    st.metric("Highest price / month", f"${max_price:.2f}")
+    st.metric("Highest price / month", f"${filtered['Price per month'].max():.2f}")
 
 # -----------------------------
 # Tabs
 # -----------------------------
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["All price points", "Competitor comparison", "Timeline", "Raw data"]
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["All price points", "Competitor comparison", "Trend lines", "Timeline", "Raw data"]
 )
 
 # -----------------------------
@@ -211,32 +232,6 @@ with tab1:
         use_container_width=True,
     )
 
-    st.subheader("Visible price point table")
-    display_cols = [
-        "Date",
-        "Country",
-        "Competitor",
-        "Channel",
-        "Plan name",
-        "Type",
-        "Length (in months)",
-        "Price per month",
-        "Total price",
-        "Discount",
-        "Additional months/benefits",
-        "Recurring total price",
-        "Any additional comments",
-    ]
-    display_cols = [c for c in display_cols if c in filtered.columns]
-
-    st.dataframe(
-        filtered[display_cols].sort_values(
-            by=[c for c in ["Competitor", "Date", "Price per month"] if c in filtered.columns],
-            ascending=[True, False, True][:len([c for c in ["Competitor", "Date", "Price per month"] if c in filtered.columns])]
-        ),
-        use_container_width=True,
-    )
-
 # -----------------------------
 # Tab 2: Competitor comparison
 # -----------------------------
@@ -258,66 +253,116 @@ with tab2:
 
     st.dataframe(summary, use_container_width=True)
 
-    st.subheader("Price range by competitor")
-
-    range_chart_df = summary.copy()
-    st.vega_lite_chart(
-        range_chart_df,
-        {
-            "layer": [
-                {
-                    "mark": {"type": "rule", "strokeWidth": 3},
-                    "encoding": {
-                        "y": {
-                            "field": "Competitor",
-                            "type": "nominal",
-                            "sort": list(range_chart_df["Competitor"]),
-                            "title": "",
-                        },
-                        "x": {
-                            "field": "min_price",
-                            "type": "quantitative",
-                            "title": "Price per month",
-                        },
-                        "x2": {"field": "max_price"},
-                        "tooltip": [
-                            {"field": "Competitor", "type": "nominal"},
-                            {"field": "price_points", "type": "quantitative"},
-                            {"field": "min_price", "type": "quantitative"},
-                            {"field": "median_price", "type": "quantitative"},
-                            {"field": "max_price", "type": "quantitative"},
-                        ],
-                    },
-                },
-                {
-                    "mark": {"type": "point", "filled": True, "size": 90},
-                    "encoding": {
-                        "y": {
-                            "field": "Competitor",
-                            "type": "nominal",
-                            "sort": list(range_chart_df["Competitor"]),
-                            "title": "",
-                        },
-                        "x": {"field": "median_price", "type": "quantitative"},
-                        "tooltip": [
-                            {"field": "Competitor", "type": "nominal"},
-                            {"field": "price_points", "type": "quantitative"},
-                            {"field": "min_price", "type": "quantitative"},
-                            {"field": "median_price", "type": "quantitative"},
-                            {"field": "max_price", "type": "quantitative"},
-                        ],
-                    },
-                },
-            ],
-            "height": 420,
-        },
-        use_container_width=True,
-    )
-
 # -----------------------------
-# Tab 3: Timeline
+# Tab 3: Trend lines
 # -----------------------------
 with tab3:
+    st.subheader("Pricing trend lines over time")
+
+    metric_choice = st.selectbox(
+        "Metric",
+        ["Price per month", "Total price"],
+        index=0,
+    )
+
+    trend_df = filtered.dropna(subset=["Date", metric_choice]).copy()
+
+    if trend_df.empty:
+        st.info("No valid Date / metric rows available for trend lines.")
+    else:
+        available_labels = sorted(trend_df["Trend label"].unique().tolist())
+        default_count = min(12, len(available_labels))
+
+        selected_line_labels = st.multiselect(
+            "Choose lines to display",
+            available_labels,
+            default=available_labels[:default_count],
+        )
+
+        if selected_line_labels:
+            trend_df = trend_df[trend_df["Trend label"].isin(selected_line_labels)]
+
+        chart_mode = st.radio(
+            "Chart mode",
+            ["Single combined chart", "One chart per competitor"],
+            horizontal=True,
+        )
+
+        if chart_mode == "Single combined chart":
+            st.vega_lite_chart(
+                trend_df,
+                {
+                    "mark": {"type": "line", "point": True},
+                    "encoding": {
+                        "x": {"field": "Date", "type": "temporal", "title": "Date"},
+                        "y": {
+                            "field": metric_choice,
+                            "type": "quantitative",
+                            "title": metric_choice,
+                        },
+                        "color": {
+                            "field": "Trend label",
+                            "type": "nominal",
+                            "title": "Line",
+                        },
+                        "tooltip": [
+                            {"field": "Date", "type": "temporal"},
+                            {"field": "Competitor", "type": "nominal"},
+                            {"field": "Plan name", "type": "nominal"},
+                            {"field": "Type", "type": "nominal"},
+                            {"field": "Length (in months)", "type": "quantitative"},
+                            {"field": metric_choice, "type": "quantitative"},
+                        ],
+                    },
+                    "height": 500,
+                },
+                use_container_width=True,
+            )
+        else:
+            competitors_in_view = sorted(trend_df["Competitor"].dropna().unique().tolist())
+
+            if not competitors_in_view:
+                st.info("No competitors available in current trend selection.")
+            else:
+                for comp in competitors_in_view:
+                    comp_df = trend_df[trend_df["Competitor"] == comp].copy()
+
+                    st.markdown(f"### {comp}")
+
+                    st.vega_lite_chart(
+                        comp_df,
+                        {
+                            "mark": {"type": "line", "point": True},
+                            "encoding": {
+                                "x": {"field": "Date", "type": "temporal", "title": "Date"},
+                                "y": {
+                                    "field": metric_choice,
+                                    "type": "quantitative",
+                                    "title": metric_choice,
+                                },
+                                "color": {
+                                    "field": "Trend label",
+                                    "type": "nominal",
+                                    "title": "Line",
+                                },
+                                "tooltip": [
+                                    {"field": "Date", "type": "temporal"},
+                                    {"field": "Competitor", "type": "nominal"},
+                                    {"field": "Plan name", "type": "nominal"},
+                                    {"field": "Type", "type": "nominal"},
+                                    {"field": "Length (in months)", "type": "quantitative"},
+                                    {"field": metric_choice, "type": "quantitative"},
+                                ],
+                            },
+                            "height": 350,
+                        },
+                        use_container_width=True,
+                    )
+
+# -----------------------------
+# Tab 4: Timeline
+# -----------------------------
+with tab4:
     st.subheader("All visible price points over time")
 
     timeline_df = filtered.dropna(subset=["Date", "Price per month"]).copy()
@@ -355,9 +400,9 @@ with tab3:
         )
 
 # -----------------------------
-# Tab 4: Raw data
+# Tab 5: Raw data
 # -----------------------------
-with tab4:
+with tab5:
     st.subheader("Raw filtered export")
     st.dataframe(filtered, use_container_width=True)
 
