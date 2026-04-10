@@ -78,7 +78,11 @@ if selected_competitors:
     step_df = step_df[step_df["Competitor"].isin(selected_competitors)]
 
 # 2. Channel
-channel_options = sorted(step_df["Channel"].dropna().unique().tolist()) if "Channel" in step_df.columns else []
+channel_options = (
+    sorted(step_df["Channel"].dropna().unique().tolist())
+    if "Channel" in step_df.columns
+    else []
+)
 selected_channels = st.sidebar.multiselect(
     "Channels",
     channel_options,
@@ -89,7 +93,11 @@ if selected_channels and "Channel" in step_df.columns:
     step_df = step_df[step_df["Channel"].isin(selected_channels)]
 
 # 3. Plan name
-plan_options = sorted(step_df["Plan name"].dropna().unique().tolist()) if "Plan name" in step_df.columns else []
+plan_options = (
+    sorted(step_df["Plan name"].dropna().unique().tolist())
+    if "Plan name" in step_df.columns
+    else []
+)
 selected_plan_names = st.sidebar.multiselect(
     "Plan names",
     plan_options,
@@ -100,7 +108,11 @@ if selected_plan_names and "Plan name" in step_df.columns:
     step_df = step_df[step_df["Plan name"].isin(selected_plan_names)]
 
 # 4. Type
-type_options = sorted(step_df["Type"].dropna().unique().tolist()) if "Type" in step_df.columns else []
+type_options = (
+    sorted(step_df["Type"].dropna().unique().tolist())
+    if "Type" in step_df.columns
+    else []
+)
 selected_types = st.sidebar.multiselect(
     "Types",
     type_options,
@@ -128,30 +140,39 @@ if selected_month_lengths and "Length (in months)" in step_df.columns:
         step_df["Length (in months)"].fillna(-1).astype(int).isin(selected_month_lengths)
     ]
 
-# 6. Date range
-if "Date" in step_df.columns and step_df["Date"].notna().any():
-    min_date = step_df["Date"].min().date()
-    max_date = step_df["Date"].max().date()
-    selected_date_range = st.sidebar.date_input(
-        "Date range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date,
-    )
-else:
-    selected_date_range = None
-
+# 6. Easier date filters: Year + Month
 filtered = step_df.copy()
 
-if (
-    selected_date_range is not None
-    and isinstance(selected_date_range, tuple)
-    and len(selected_date_range) == 2
-    and "Date" in filtered.columns
-):
-    start_date = pd.to_datetime(selected_date_range[0])
-    end_date = pd.to_datetime(selected_date_range[1])
-    filtered = filtered[filtered["Date"].between(start_date, end_date)]
+if "Date" in filtered.columns and filtered["Date"].notna().any():
+    filtered["Year"] = filtered["Date"].dt.year
+    filtered["Month"] = filtered["Date"].dt.month
+
+    year_options = sorted(filtered["Year"].dropna().astype(int).unique().tolist())
+    selected_years = st.sidebar.multiselect(
+        "Years",
+        year_options,
+        default=year_options,
+    )
+
+    if selected_years:
+        filtered = filtered[filtered["Year"].isin(selected_years)]
+
+    month_options = sorted(filtered["Month"].dropna().astype(int).unique().tolist())
+    month_name_map = {
+        1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
+        5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
+        9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
+    }
+
+    selected_months = st.sidebar.multiselect(
+        "Months",
+        month_options,
+        default=month_options,
+        format_func=lambda x: month_name_map.get(x, str(x)),
+    )
+
+    if selected_months:
+        filtered = filtered[filtered["Month"].isin(selected_months)]
 
 if filtered.empty:
     st.warning("No rows match your filters.")
@@ -161,27 +182,27 @@ if filtered.empty:
 # Smart trend label
 # -----------------------------
 def build_trend_label(row, frame):
-    varying_parts = []
+    parts = []
 
     if frame["Competitor"].nunique() > 1:
-        varying_parts.append(str(row["Competitor"]))
+        parts.append(str(row["Competitor"]))
 
     if "Plan name" in frame.columns and frame["Plan name"].nunique() > 1:
-        varying_parts.append(str(row["Plan name"]))
+        parts.append(str(row["Plan name"]))
 
     if "Type" in frame.columns and frame["Type"].nunique() > 1:
-        varying_parts.append(str(row["Type"]))
+        parts.append(str(row["Type"]))
 
     if "Length (in months)" in frame.columns and frame["Length (in months)"].nunique() > 1:
         try:
-            varying_parts.append(f"{int(row['Length (in months)'])}m")
+            parts.append(f"{int(row['Length (in months)'])}m")
         except Exception:
-            varying_parts.append(str(row["Length (in months)"]))
+            parts.append(str(row["Length (in months)"]))
 
-    if not varying_parts:
+    if not parts:
         return str(row["Competitor"])
 
-    return " | ".join(varying_parts)
+    return " | ".join(parts)
 
 filtered["Trend label"] = filtered.apply(lambda row: build_trend_label(row, filtered), axis=1)
 
@@ -209,6 +230,9 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
     ["All price points", "Competitor comparison", "Trend lines", "Timeline", "Raw data"]
 )
 
+# -----------------------------
+# Tab 1: All price points
+# -----------------------------
 with tab1:
     st.subheader("All visible price points by competitor")
 
@@ -244,7 +268,7 @@ with tab1:
                     {"field": "Length (in months)", "type": "quantitative"},
                     {"field": "Price per month", "type": "quantitative"},
                     {"field": "Total price", "type": "quantitative"},
-                    {"field": "Date", "type": "temporal"},
+                    {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
                 ],
             },
             "height": 500,
@@ -252,6 +276,9 @@ with tab1:
         use_container_width=True,
     )
 
+# -----------------------------
+# Tab 2: Competitor comparison
+# -----------------------------
 with tab2:
     st.subheader("Competitor comparison summary")
 
@@ -270,6 +297,9 @@ with tab2:
 
     st.dataframe(summary, use_container_width=True)
 
+# -----------------------------
+# Tab 3: Trend lines
+# -----------------------------
 with tab3:
     st.subheader("Pricing trend lines over time")
 
@@ -280,6 +310,7 @@ with tab3:
     )
 
     trend_df = filtered.dropna(subset=["Date", metric_choice]).copy()
+    trend_df = trend_df.sort_values("Date")
 
     if trend_df.empty:
         st.info("No valid Date / metric rows available for trend lines.")
@@ -301,31 +332,44 @@ with tab3:
             horizontal=True,
         )
 
+        base_encoding = {
+            "x": {
+                "field": "Date",
+                "type": "temporal",
+                "title": "Scrape date",
+                "axis": {
+                    "format": "%Y-%m-%d",
+                    "labelAngle": -45,
+                    "labelOverlap": "greedy"
+                },
+            },
+            "y": {
+                "field": metric_choice,
+                "type": "quantitative",
+                "title": metric_choice,
+            },
+            "tooltip": [
+                {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
+                {"field": "Competitor", "type": "nominal"},
+                {"field": "Plan name", "type": "nominal"},
+                {"field": "Type", "type": "nominal"},
+                {"field": "Length (in months)", "type": "quantitative"},
+                {"field": metric_choice, "type": "quantitative"},
+            ],
+        }
+
         if chart_mode == "Single combined chart":
             st.vega_lite_chart(
                 trend_df,
                 {
                     "mark": {"type": "line", "point": True},
                     "encoding": {
-                        "x": {"field": "Date", "type": "temporal", "title": "Date"},
-                        "y": {
-                            "field": metric_choice,
-                            "type": "quantitative",
-                            "title": metric_choice,
-                        },
+                        **base_encoding,
                         "color": {
                             "field": "Trend label",
                             "type": "nominal",
                             "title": "Line",
                         },
-                        "tooltip": [
-                            {"field": "Date", "type": "temporal"},
-                            {"field": "Competitor", "type": "nominal"},
-                            {"field": "Plan name", "type": "nominal"},
-                            {"field": "Type", "type": "nominal"},
-                            {"field": "Length (in months)", "type": "quantitative"},
-                            {"field": metric_choice, "type": "quantitative"},
-                        ],
                     },
                     "height": 500,
                 },
@@ -341,31 +385,21 @@ with tab3:
                     {
                         "mark": {"type": "line", "point": True},
                         "encoding": {
-                            "x": {"field": "Date", "type": "temporal", "title": "Date"},
-                            "y": {
-                                "field": metric_choice,
-                                "type": "quantitative",
-                                "title": metric_choice,
-                            },
+                            **base_encoding,
                             "color": {
                                 "field": "Trend label",
                                 "type": "nominal",
                                 "title": "Line",
                             },
-                            "tooltip": [
-                                {"field": "Date", "type": "temporal"},
-                                {"field": "Competitor", "type": "nominal"},
-                                {"field": "Plan name", "type": "nominal"},
-                                {"field": "Type", "type": "nominal"},
-                                {"field": "Length (in months)", "type": "quantitative"},
-                                {"field": metric_choice, "type": "quantitative"},
-                            ],
                         },
                         "height": 350,
                     },
                     use_container_width=True,
                 )
 
+# -----------------------------
+# Tab 4: Timeline
+# -----------------------------
 with tab4:
     st.subheader("All visible price points over time")
 
@@ -380,7 +414,16 @@ with tab4:
             {
                 "mark": {"type": "circle", "size": 70, "opacity": 0.7},
                 "encoding": {
-                    "x": {"field": "Date", "type": "temporal", "title": "Date"},
+                    "x": {
+                        "field": "Date",
+                        "type": "temporal",
+                        "title": "Scrape date",
+                        "axis": {
+                            "format": "%Y-%m-%d",
+                            "labelAngle": -45,
+                            "labelOverlap": "greedy"
+                        },
+                    },
                     "y": {
                         "field": "Price per month",
                         "type": "quantitative",
@@ -388,7 +431,7 @@ with tab4:
                     },
                     "color": {"field": "Competitor", "type": "nominal"},
                     "tooltip": [
-                        {"field": "Date", "type": "temporal"},
+                        {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
                         {"field": "Competitor", "type": "nominal"},
                         {"field": "Plan name", "type": "nominal"},
                         {"field": "Channel", "type": "nominal"},
@@ -403,11 +446,21 @@ with tab4:
             use_container_width=True,
         )
 
+# -----------------------------
+# Tab 5: Raw data
+# -----------------------------
 with tab5:
     st.subheader("Raw filtered export")
-    st.dataframe(filtered, use_container_width=True)
+    export_df = filtered.copy()
 
-    csv_data = filtered.to_csv(index=False).encode("utf-8")
+    if "Year" in export_df.columns:
+        export_df = export_df.drop(columns=["Year"])
+    if "Month" in export_df.columns:
+        export_df = export_df.drop(columns=["Month"])
+
+    st.dataframe(export_df, use_container_width=True)
+
+    csv_data = export_df.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="Download filtered data as CSV",
         data=csv_data,
