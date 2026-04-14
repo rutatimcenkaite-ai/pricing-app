@@ -289,11 +289,7 @@ with tab1:
     st.subheader("Insights")
 
     latest_date = filtered["Date"].max() if "Date" in filtered.columns and filtered["Date"].notna().any() else None
-
-    if latest_date is not None:
-        latest_rows = filtered[filtered["Date"] == latest_date].copy()
-    else:
-        latest_rows = filtered.copy()
+    latest_rows = filtered[filtered["Date"] == latest_date].copy() if latest_date is not None else filtered.copy()
 
     insight_col1, insight_col2 = st.columns(2)
 
@@ -314,12 +310,17 @@ with tab1:
             )
 
         range_summary = (
-            filtered.groupby("Competitor", as_index=False)["Price per month"]
-            .agg(["min", "max", "median", "count"])
-            .reset_index()
+            filtered.groupby("Competitor", as_index=False)
+            .agg(
+                Min=("Price per month", "min"),
+                Max=("Price per month", "max"),
+                Median=("Price per month", "median"),
+                Price_points=("Price per month", "count"),
+            )
+            .sort_values("Min")
         )
-        range_summary.columns = ["Competitor", "Min", "Max", "Median", "Price points"]
-        st.dataframe(range_summary.sort_values("Min"), use_container_width=True, hide_index=True)
+
+        st.dataframe(range_summary, use_container_width=True, hide_index=True)
 
     with insight_col2:
         st.markdown("#### Change activity")
@@ -347,7 +348,6 @@ with tab1:
 
                 st.dataframe(change_summary, use_container_width=True, hide_index=True)
 
-        cheapest_by_length = None
         if "Length (in months)" in filtered.columns:
             cheapest_by_length = (
                 filtered.dropna(subset=["Length (in months)", "Price per month"])
@@ -356,9 +356,9 @@ with tab1:
                 .first()[["Length (in months)", "Competitor", "Plan name", "Price per month"]]
             )
 
-        if cheapest_by_length is not None and not cheapest_by_length.empty:
-            st.markdown("#### Cheapest offer by length")
-            st.dataframe(cheapest_by_length, use_container_width=True, hide_index=True)
+            if not cheapest_by_length.empty:
+                st.markdown("#### Cheapest offer by length")
+                st.dataframe(cheapest_by_length, use_container_width=True, hide_index=True)
 
 # -----------------------------
 # Tab 2: All price points
