@@ -5,7 +5,8 @@ st.set_page_config(page_title="Pricing Intelligence Tool", layout="wide")
 
 MAIN_SHEET = "Main"
 
-DEFAULT_COMPETITORS = ["NordVPN", "ExpressVPN", "ProtonVPN"]
+DEFAULT_COMPETITORS = ["NordVPN", "ExpressVPN", "ProtonVPN", "Proton"]
+
 EVENTS = {
     "Default": "2025-09-22",
     "Black Friday": "2025-11-28",
@@ -14,18 +15,72 @@ EVENTS = {
     "Valentine's Day": "2026-02-04",
     "Spring sale": "2026-03-24",
 }
+
 TWO_YEAR_LENGTHS = [24, 27, 28]
 
-COMPETITOR_COLOR_SCALE = {
-    "domain": ["NordVPN", "ExpressVPN", "ProtonVPN", "Proton", "Surfshark", "CyberGhost", "PIA"],
-    "range": ["#4285f4", "#EA4335", "#34A853", "#34A853", "#FABB05", "#A142F4", "#00ACC1"],
+COMPETITOR_COLORS = {
+    "NordVPN": "#4285f4",
+    "ExpressVPN": "#EA4335",
+    "ProtonVPN": "#34A853",
+    "Proton": "#34A853",
+    "Surfshark": "#FABB05",
+    "CyberGhost": "#A142F4",
+    "PIA": "#00ACC1",
+    "PureVPN": "#0F9D58",
+    "Norton": "#FB8C00",
+    "McAfee": "#DB4437",
+    "IPVanish": "#7E57C2",
+    "Aura": "#8D6E63",
 }
+
+DEFAULT_COLOR = "#5f6368"
 
 
 def fmt_currency(value):
     if pd.isna(value):
         return ""
     return f"${value:.2f}"
+
+
+def fmt_date(value):
+    if pd.isna(value):
+        return ""
+    try:
+        return pd.to_datetime(value).strftime("%Y-%m-%d")
+    except Exception:
+        return str(value)
+
+
+def get_competitor_color(name: str) -> str:
+    return COMPETITOR_COLORS.get(name, DEFAULT_COLOR)
+
+
+def apply_date_filter(frame: pd.DataFrame, start_date, end_date) -> pd.DataFrame:
+    if "Date" not in frame.columns or frame["Date"].notna().sum() == 0:
+        return frame.copy()
+
+    return frame[frame["Date"].dt.date.between(start_date, end_date)].copy()
+
+
+def build_trend_label(row: pd.Series, frame: pd.DataFrame) -> str:
+    parts = []
+
+    if "Plan name" in frame.columns and frame["Plan name"].nunique() > 1:
+        parts.append(str(row["Plan name"]))
+
+    if "Type" in frame.columns and frame["Type"].nunique() > 1:
+        parts.append(str(row["Type"]))
+
+    if "Length (in months)" in frame.columns and frame["Length (in months)"].nunique() > 1:
+        try:
+            parts.append(f"{int(row['Length (in months)'])}m")
+        except Exception:
+            parts.append(str(row["Length (in months)"]))
+
+    if not parts:
+        return str(row["Competitor"])
+
+    return " | ".join(parts)
 
 
 st.title("Pricing Intelligence Tool")
@@ -75,13 +130,15 @@ for col in text_cols:
         df.loc[df[col] == "", col] = "Unknown"
 
 if "Competitor" in df.columns:
-    df = df[df["Competitor"].notna()]
+    df = df[df["Competitor"].notna()].copy()
 if "Price per month" in df.columns:
-    df = df[df["Price per month"].notna()]
+    df = df[df["Price per month"].notna()].copy()
 
 if df.empty:
     st.warning("No usable rows found in the Main sheet.")
     st.stop()
+
+latest_in_file = df["Date"].max() if "Date" in df.columns and df["Date"].notna().any() else None
 
 # -----------------------------
 # Sidebar filters
@@ -91,12 +148,10 @@ st.sidebar.header("Filters")
 if st.sidebar.button("Reset filters"):
     st.rerun()
 
-filtered = df.copy()
-
-# Start / End date
-if "Date" in filtered.columns and filtered["Date"].notna().any():
-    min_date = filtered["Date"].min().date()
-    max_date = filtered["Date"].max().date()
+# Date controls first
+if "Date" in df.columns and df["Date"].notna().any():
+    min_date = df["Date"].min().date()
+    max_date = df["Date"].max().date()
 
     start_date = st.sidebar.date_input(
         "Start date",
@@ -117,22 +172,23 @@ if "Date" in filtered.columns and filtered["Date"].notna().any():
     if start_date > end_date:
         st.sidebar.error("Start date cannot be later than end date.")
         st.stop()
+else:
+    start_date = None
+    end_date = None
 
-    filtered = filtered[
-        filtered["Date"].dt.date.between(start_date, end_date)
-    ]
-
-if filtered.empty:
+# The options shown below follow the requested order and depend on prior selections.
+date_scoped = apply_date_filter(df, start_date, end_date) if start_date and end_date else df.copy()
+if date_scoped.empty:
     st.warning("No rows match the selected date range.")
     st.stop()
 
 # Competitor
-competitor_options = (
-    sorted(filtered["Competitor"].dropna().astype(str).unique().tolist())
-    if "Competitor" in filtered.columns
-    else []
-)
-default_competitors = [c for c in DEFAULT_COMPETITORS if c in competitor_options]
+competitor_options = sorted(date_scoped["Competitor"].dropna().astype(str).unique().tolist())
+
+default_competitors = []
+for c in DEFAULT_COMPETITORS:
+    if c in competitor_options and c not in default_competitors:
+        default_competitors.append(c)
 if not default_competitors:
     default_competitors = competitor_options[:3] if len(competitor_options) >= 3 else competitor_options
 
@@ -142,19 +198,18 @@ selected_competitors = st.sidebar.multiselect(
     default=default_competitors,
 )
 
-if selected_competitors and "Competitor" in filtered.columns:
-    filtered = filtered[filtered["Competitor"].astype(str).isin(selected_competitors)]
+step = date_scoped.copy()
+if selected_competitors:
+    step = step[step["Competitor"].astype(str).isin(selected_competitors)].copy()
 
-if filtered.empty:
+if step.empty:
     st.warning("No rows match the selected competitors.")
     st.stop()
 
 # Length
 length_options = []
-if "Length (in months)" in filtered.columns:
-    length_options = sorted(
-        [int(x) for x in filtered["Length (in months)"].dropna().unique().tolist()]
-    )
+if "Length (in months)" in step.columns:
+    length_options = sorted([int(x) for x in step["Length (in months)"].dropna().unique().tolist()])
 
 selected_lengths = st.sidebar.multiselect(
     "Length (in months)",
@@ -162,106 +217,91 @@ selected_lengths = st.sidebar.multiselect(
     default=length_options,
 )
 
-if selected_lengths and "Length (in months)" in filtered.columns:
-    filtered = filtered[
-        filtered["Length (in months)"].fillna(-1).astype(int).isin(selected_lengths)
-    ]
+if selected_lengths and "Length (in months)" in step.columns:
+    step = step[step["Length (in months)"].fillna(-1).astype(int).isin(selected_lengths)].copy()
 
-if filtered.empty:
+if step.empty:
     st.warning("No rows match the selected lengths.")
     st.stop()
 
 # Channel
-channel_options = (
-    sorted(filtered["Channel"].dropna().astype(str).unique().tolist())
-    if "Channel" in filtered.columns
-    else []
-)
+channel_options = sorted(step["Channel"].dropna().astype(str).unique().tolist()) if "Channel" in step.columns else []
 selected_channels = st.sidebar.multiselect(
     "Channel",
     channel_options,
     default=channel_options,
 )
 
-if selected_channels and "Channel" in filtered.columns:
-    filtered = filtered[filtered["Channel"].astype(str).isin(selected_channels)]
+if selected_channels and "Channel" in step.columns:
+    step = step[step["Channel"].astype(str).isin(selected_channels)].copy()
 
-if filtered.empty:
+if step.empty:
     st.warning("No rows match the selected channels.")
     st.stop()
 
 # Type
-type_options = (
-    sorted(filtered["Type"].dropna().astype(str).unique().tolist())
-    if "Type" in filtered.columns
-    else []
-)
+type_options = sorted(step["Type"].dropna().astype(str).unique().tolist()) if "Type" in step.columns else []
 selected_types = st.sidebar.multiselect(
     "Type",
     type_options,
     default=type_options,
 )
 
-if selected_types and "Type" in filtered.columns:
-    filtered = filtered[filtered["Type"].astype(str).isin(selected_types)]
+if selected_types and "Type" in step.columns:
+    step = step[step["Type"].astype(str).isin(selected_types)].copy()
 
-if filtered.empty:
+if step.empty:
     st.warning("No rows match the selected types.")
     st.stop()
 
-# Plan name
-plan_options = (
-    sorted(filtered["Plan name"].dropna().astype(str).unique().tolist())
-    if "Plan name" in filtered.columns
-    else []
-)
-selected_plan_names = st.sidebar.multiselect(
-    "Plan name",
-    plan_options,
-    default=plan_options,
-)
+# Advanced filters are back
+with st.sidebar.expander("Advanced filters", expanded=False):
+    plan_options = sorted(step["Plan name"].dropna().astype(str).unique().tolist()) if "Plan name" in step.columns else []
+    selected_plan_names = st.multiselect(
+        "Plan name",
+        plan_options,
+        default=plan_options,
+    )
 
-if selected_plan_names and "Plan name" in filtered.columns:
-    filtered = filtered[filtered["Plan name"].astype(str).isin(selected_plan_names)]
+filtered = step.copy()
+if "selected_plan_names" in locals() and selected_plan_names and "Plan name" in filtered.columns:
+    filtered = filtered[filtered["Plan name"].astype(str).isin(selected_plan_names)].copy()
 
 if filtered.empty:
-    st.warning("No rows match the selected plan names.")
+    st.warning("No rows match the current filters.")
     st.stop()
 
-# -----------------------------
-# Labels and summary fields
-# -----------------------------
-def build_trend_label(row: pd.Series, frame: pd.DataFrame) -> str:
-    parts = []
+# Event view should ignore the Start/End date filter, but keep the other filters.
+event_filtered = df.copy()
+if selected_competitors:
+    event_filtered = event_filtered[event_filtered["Competitor"].astype(str).isin(selected_competitors)].copy()
+if selected_lengths and "Length (in months)" in event_filtered.columns:
+    event_filtered = event_filtered[
+        event_filtered["Length (in months)"].fillna(-1).astype(int).isin(selected_lengths)
+    ].copy()
+if selected_channels and "Channel" in event_filtered.columns:
+    event_filtered = event_filtered[event_filtered["Channel"].astype(str).isin(selected_channels)].copy()
+if selected_types and "Type" in event_filtered.columns:
+    event_filtered = event_filtered[event_filtered["Type"].astype(str).isin(selected_types)].copy()
+if "selected_plan_names" in locals() and selected_plan_names and "Plan name" in event_filtered.columns:
+    event_filtered = event_filtered[event_filtered["Plan name"].astype(str).isin(selected_plan_names)].copy()
 
-    if "Competitor" in frame.columns and frame["Competitor"].nunique() > 1:
-        parts.append(str(row["Competitor"]))
-
-    if "Plan name" in frame.columns and frame["Plan name"].nunique() > 1:
-        parts.append(str(row["Plan name"]))
-
-    if "Type" in frame.columns and frame["Type"].nunique() > 1:
-        parts.append(str(row["Type"]))
-
-    if "Length (in months)" in frame.columns and frame["Length (in months)"].nunique() > 1:
-        try:
-            parts.append(f"{int(row['Length (in months)'])}m")
-        except Exception:
-            parts.append(str(row["Length (in months)"]))
-
-    if not parts:
-        return str(row["Competitor"])
-
-    return " | ".join(parts)
-
+# Labels
 filtered["Trend label"] = filtered.apply(lambda row: build_trend_label(row, filtered), axis=1)
+event_filtered["Trend label"] = event_filtered.apply(lambda row: build_trend_label(row, event_filtered), axis=1)
 
-latest_in_file = df["Date"].max() if "Date" in df.columns and df["Date"].notna().any() else None
 latest_visible = filtered["Date"].max() if "Date" in filtered.columns and filtered["Date"].notna().any() else None
 
-# -----------------------------
+# Top competitor name summary
+competitors_in_view = sorted(filtered["Competitor"].dropna().astype(str).unique().tolist())
+st.markdown(
+    f"<div style='font-size:0.95rem;color:#5f6368;margin-top:-8px;margin-bottom:10px'>"
+    f"Competitors in view: <b>{', '.join(competitors_in_view) if competitors_in_view else 'None'}</b>"
+    f"</div>",
+    unsafe_allow_html=True,
+)
+
 # KPI cards
-# -----------------------------
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
@@ -278,13 +318,11 @@ with col4:
 
 meta1, meta2 = st.columns(2)
 with meta1:
-    st.caption(f"Latest scrape in file: {latest_in_file.strftime('%Y-%m-%d') if latest_in_file is not None else 'N/A'}")
+    st.caption(f"Latest scrape in file: {fmt_date(latest_in_file)}")
 with meta2:
-    st.caption(f"Latest visible scrape: {latest_visible.strftime('%Y-%m-%d') if latest_visible is not None else 'N/A'}")
+    st.caption(f"Latest visible scrape: {fmt_date(latest_visible)}")
 
-# -----------------------------
 # Tabs
-# -----------------------------
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     ["Insights", "All price points", "Competitor comparison", "Trend lines", "Timeline", "Event view", "Raw data"]
 )
@@ -298,10 +336,11 @@ with tab1:
 
     latest_rows = filtered[filtered["Date"] == latest_visible].copy() if latest_visible is not None else filtered.copy()
 
-    insight_col1, insight_col2 = st.columns(2)
+    left, right = st.columns(2)
 
-    with insight_col1:
+    with left:
         st.markdown("#### Snapshot")
+
         if not latest_rows.empty:
             cheapest_now = latest_rows.loc[latest_rows["Price per month"].idxmin()]
             highest_now = latest_rows.loc[latest_rows["Price per month"].idxmax()]
@@ -317,7 +356,7 @@ with tab1:
                 f"at **{fmt_currency(highest_now['Price per month'])}/month**"
             )
 
-        simple_summary = (
+        cheapest_by_comp = (
             filtered.sort_values(["Competitor", "Price per month", "Date"])
             .groupby("Competitor", as_index=False)
             .first()[["Competitor", "Plan name", "Type", "Price per month", "Date"]]
@@ -330,27 +369,28 @@ with tab1:
                 }
             )
         )
-        simple_summary["Lowest visible monthly price"] = simple_summary["Lowest visible monthly price"].map(fmt_currency)
+        cheapest_by_comp["Lowest visible monthly price"] = cheapest_by_comp["Lowest visible monthly price"].map(fmt_currency)
+        cheapest_by_comp["Date of cheapest visible offer"] = cheapest_by_comp["Date of cheapest visible offer"].map(fmt_date)
 
         st.markdown("#### Cheapest visible offer by competitor")
-        st.dataframe(simple_summary, use_container_width=True, hide_index=True)
+        st.dataframe(cheapest_by_comp, use_container_width=True, hide_index=True)
 
-    with insight_col2:
+    with right:
         st.markdown("#### Price ranges")
-        range_summary = (
+        ranges = (
             filtered.groupby("Competitor", as_index=False)
             .agg(
                 Lowest_visible_monthly_price=("Price per month", "min"),
                 Highest_visible_monthly_price=("Price per month", "max"),
-                Cheapest_plan=("Plan name", "first"),
                 Latest_visible_scrape=("Date", "max"),
             )
             .sort_values("Lowest_visible_monthly_price")
         )
-        range_summary["Lowest_visible_monthly_price"] = range_summary["Lowest_visible_monthly_price"].map(fmt_currency)
-        range_summary["Highest_visible_monthly_price"] = range_summary["Highest_visible_monthly_price"].map(fmt_currency)
+        ranges["Lowest_visible_monthly_price"] = ranges["Lowest_visible_monthly_price"].map(fmt_currency)
+        ranges["Highest_visible_monthly_price"] = ranges["Highest_visible_monthly_price"].map(fmt_currency)
+        ranges["Latest_visible_scrape"] = ranges["Latest_visible_scrape"].map(fmt_date)
 
-        st.dataframe(range_summary, use_container_width=True, hide_index=True)
+        st.dataframe(ranges, use_container_width=True, hide_index=True)
 
         if "Length (in months)" in filtered.columns:
             cheapest_by_length = (
@@ -369,7 +409,7 @@ with tab1:
 # -----------------------------
 with tab2:
     st.subheader("All visible price points by competitor")
-    st.caption("Shows every visible monthly price point. NordVPN stays blue across charts.")
+    st.caption("Shows every visible monthly price point.")
 
     st.vega_lite_chart(
         filtered,
@@ -379,7 +419,7 @@ with tab2:
                 "x": {
                     "field": "Competitor",
                     "type": "nominal",
-                    "sort": sorted(filtered["Competitor"].dropna().astype(str).unique().tolist()),
+                    "sort": competitors_in_view,
                     "title": "Competitor",
                     "axis": {"labelAngle": -35},
                 },
@@ -392,7 +432,10 @@ with tab2:
                 "color": {
                     "field": "Competitor",
                     "type": "nominal",
-                    "scale": COMPETITOR_COLOR_SCALE,
+                    "scale": {
+                        "domain": list(COMPETITOR_COLORS.keys()),
+                        "range": [COMPETITOR_COLORS[k] for k in COMPETITOR_COLORS.keys()],
+                    },
                     "legend": None,
                 },
                 "tooltip": [
@@ -416,11 +459,10 @@ with tab2:
 # -----------------------------
 with tab3:
     st.subheader("Competitor comparison")
-    st.caption("Simple range view without median or hard-to-read columns.")
+    st.caption("Simple range view.")
 
     comparison = (
-        filtered.sort_values(["Competitor", "Price per month", "Date"])
-        .groupby("Competitor", as_index=False)
+        filtered.groupby("Competitor", as_index=False)
         .agg(
             Lowest_visible_monthly_price=("Price per month", "min"),
             Highest_visible_monthly_price=("Price per month", "max"),
@@ -428,9 +470,9 @@ with tab3:
         )
         .sort_values("Lowest_visible_monthly_price")
     )
-
     comparison["Lowest_visible_monthly_price"] = comparison["Lowest_visible_monthly_price"].map(fmt_currency)
     comparison["Highest_visible_monthly_price"] = comparison["Highest_visible_monthly_price"].map(fmt_currency)
+    comparison["Latest_visible_scrape"] = comparison["Latest_visible_scrape"].map(fmt_date)
 
     st.dataframe(comparison, use_container_width=True, hide_index=True)
 
@@ -439,7 +481,7 @@ with tab3:
 # -----------------------------
 with tab4:
     st.subheader("Pricing trend lines over time")
-    st.caption("Use current filters first. Then choose which visible lines to show.")
+    st.caption("Competitor colors stay fixed. Different plans are separated by line style, not by color.")
 
     metric_choice = st.selectbox(
         "Metric",
@@ -463,7 +505,7 @@ with tab4:
         )
 
         if selected_line_labels:
-            trend_df = trend_df[trend_df["Trend label"].isin(selected_line_labels)]
+            trend_df = trend_df[trend_df["Trend label"].isin(selected_line_labels)].copy()
 
         chart_mode = st.radio(
             "Chart mode",
@@ -471,46 +513,45 @@ with tab4:
             horizontal=True,
         )
 
-        base_encoding = {
-            "x": {
-                "field": "Date",
-                "type": "temporal",
-                "title": "Scrape date",
-                "axis": {
-                    "format": "%Y-%m-%d",
-                    "labelAngle": -45,
-                    "labelOverlap": "greedy",
-                },
-            },
-            "y": {
-                "field": metric_choice,
-                "type": "quantitative",
-                "title": metric_choice,
-                "axis": {"format": "$.2f"},
-            },
-            "tooltip": [
-                {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
-                {"field": "Competitor", "type": "nominal"},
-                {"field": "Channel", "type": "nominal"},
-                {"field": "Type", "type": "nominal"},
-                {"field": "Plan name", "type": "nominal"},
-                {"field": "Length (in months)", "type": "quantitative"},
-                {"field": metric_choice, "type": "quantitative", "format": "$.2f"},
-            ],
-        }
-
         if chart_mode == "Single combined chart":
             st.vega_lite_chart(
                 trend_df,
                 {
                     "mark": {"type": "line", "point": True},
                     "encoding": {
-                        **base_encoding,
+                        "x": {
+                            "field": "Date",
+                            "type": "temporal",
+                            "title": "Scrape date",
+                            "axis": {"format": "%Y-%m-%d", "labelAngle": -45, "labelOverlap": "greedy"},
+                        },
+                        "y": {
+                            "field": metric_choice,
+                            "type": "quantitative",
+                            "title": metric_choice,
+                            "axis": {"format": "$.2f"},
+                        },
                         "color": {
+                            "field": "Competitor",
+                            "type": "nominal",
+                            "scale": {
+                                "domain": list(COMPETITOR_COLORS.keys()),
+                                "range": [COMPETITOR_COLORS[k] for k in COMPETITOR_COLORS.keys()],
+                            },
+                        },
+                        "strokeDash": {
                             "field": "Trend label",
                             "type": "nominal",
-                            "title": "Line",
+                            "title": "Plan",
                         },
+                        "tooltip": [
+                            {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
+                            {"field": "Competitor", "type": "nominal"},
+                            {"field": "Plan name", "type": "nominal"},
+                            {"field": "Type", "type": "nominal"},
+                            {"field": "Length (in months)", "type": "quantitative"},
+                            {"field": metric_choice, "type": "quantitative", "format": "$.2f"},
+                        ],
                     },
                     "height": 500,
                 },
@@ -520,24 +561,49 @@ with tab4:
             competitor_list = sorted(trend_df["Competitor"].dropna().astype(str).unique().tolist())
             for comp in competitor_list:
                 comp_df = trend_df[trend_df["Competitor"] == comp].copy()
-                title_color = "#4285f4" if comp == "NordVPN" else "#111111"
+                comp_color = get_competitor_color(comp)
+
                 st.markdown(
-                    f"<div style='font-size:1.05rem;font-weight:600;color:{title_color};margin-top:10px'>{comp}</div>",
+                    f"<div style='font-size:1.02rem;font-weight:600;color:{comp_color};margin-top:8px'>{comp}</div>",
                     unsafe_allow_html=True,
                 )
-                st.caption("Showing the currently visible plans for this competitor.")
+                st.markdown(
+                    f"<div style='font-size:0.82rem;color:#188038;margin-bottom:8px'>"
+                    f"Showing visible plans for {comp}."
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
 
                 st.vega_lite_chart(
                     comp_df,
                     {
-                        "mark": {"type": "line", "point": True},
+                        "mark": {"type": "line", "point": True, "color": comp_color},
                         "encoding": {
-                            **base_encoding,
-                            "color": {
+                            "x": {
+                                "field": "Date",
+                                "type": "temporal",
+                                "title": "Scrape date",
+                                "axis": {"format": "%Y-%m-%d", "labelAngle": -45, "labelOverlap": "greedy"},
+                            },
+                            "y": {
+                                "field": metric_choice,
+                                "type": "quantitative",
+                                "title": metric_choice,
+                                "axis": {"format": "$.2f"},
+                            },
+                            "strokeDash": {
                                 "field": "Trend label",
                                 "type": "nominal",
-                                "title": "Line",
+                                "title": "Plan",
                             },
+                            "tooltip": [
+                                {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
+                                {"field": "Competitor", "type": "nominal"},
+                                {"field": "Plan name", "type": "nominal"},
+                                {"field": "Type", "type": "nominal"},
+                                {"field": "Length (in months)", "type": "quantitative"},
+                                {"field": metric_choice, "type": "quantitative", "format": "$.2f"},
+                            ],
                         },
                         "height": 320,
                     },
@@ -566,11 +632,7 @@ with tab5:
                         "field": "Date",
                         "type": "temporal",
                         "title": "Scrape date",
-                        "axis": {
-                            "format": "%Y-%m-%d",
-                            "labelAngle": -45,
-                            "labelOverlap": "greedy",
-                        },
+                        "axis": {"format": "%Y-%m-%d", "labelAngle": -45, "labelOverlap": "greedy"},
                     },
                     "y": {
                         "field": "Price per month",
@@ -581,7 +643,10 @@ with tab5:
                     "color": {
                         "field": "Competitor",
                         "type": "nominal",
-                        "scale": COMPETITOR_COLOR_SCALE,
+                        "scale": {
+                            "domain": list(COMPETITOR_COLORS.keys()),
+                            "range": [COMPETITOR_COLORS[k] for k in COMPETITOR_COLORS.keys()],
+                        },
                     },
                     "tooltip": [
                         {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
@@ -604,19 +669,24 @@ with tab5:
 # -----------------------------
 with tab6:
     st.subheader("Price points by event")
-    st.caption("For each predefined event, this shows the cheapest 2-year plan per competitor. Plan lengths considered: 24, 27, 28 months.")
+    st.caption("This tab ignores Start date / End date and always uses your predefined event dates.")
 
-    event_source = filtered.copy()
-    event_source = event_source.dropna(subset=["Date", "Price per month"])
-
+    event_source = event_filtered.copy().dropna(subset=["Date", "Price per month"])
     if "Length (in months)" in event_source.columns:
         event_source = event_source[
             event_source["Length (in months)"].fillna(-1).astype(int).isin(TWO_YEAR_LENGTHS)
-        ]
+        ].copy()
 
     if event_source.empty:
-        st.warning("No visible rows available for 2-year plans (24, 27, 28 months) under current filters.")
+        st.warning("No visible rows available for 2-year plans (24, 27, 28 months) under current non-date filters.")
     else:
+        event_metric = st.selectbox(
+            "Event metric",
+            ["Price per month", "Total price"],
+            index=0,
+            key="event_metric",
+        )
+
         event_rows = []
 
         for event_name, event_date_str in EVENTS.items():
@@ -649,7 +719,13 @@ with tab6:
             event_df = pd.concat(event_rows, ignore_index=True)
 
             st.markdown("#### Cheapest 2Y plan by event")
-            st.caption("Green text below the chart explains what this view contains.")
+            st.markdown(
+                "<div style='font-size:0.82rem;color:#188038;margin-bottom:8px'>"
+                "Uses your predefined event dates, finds the closest scrape date to each event, "
+                "then picks the cheapest visible 24/27/28-month plan per competitor."
+                "</div>",
+                unsafe_allow_html=True,
+            )
 
             st.vega_lite_chart(
                 event_df,
@@ -663,18 +739,22 @@ with tab6:
                             "title": "Event",
                         },
                         "y": {
-                            "field": "Price per month",
+                            "field": event_metric,
                             "type": "quantitative",
-                            "title": "Price per month",
+                            "title": event_metric,
                             "axis": {"format": "$.2f"},
                         },
                         "color": {
                             "field": "Competitor",
                             "type": "nominal",
-                            "scale": COMPETITOR_COLOR_SCALE,
+                            "scale": {
+                                "domain": list(COMPETITOR_COLORS.keys()),
+                                "range": [COMPETITOR_COLORS[k] for k in COMPETITOR_COLORS.keys()],
+                            },
                         },
                         "tooltip": [
                             {"field": "Event", "type": "nominal"},
+                            {"field": "Target event date", "type": "temporal", "format": "%Y-%m-%d"},
                             {"field": "Competitor", "type": "nominal"},
                             {"field": "Plan name", "type": "nominal"},
                             {"field": "Type", "type": "nominal"},
@@ -689,20 +769,11 @@ with tab6:
                 use_container_width=True,
             )
 
-            st.markdown(
-                "<div style='font-size:0.85rem;color:#188038;margin-top:6px'>"
-                "This chart uses the closest scrape date to each predefined event date, "
-                "then chooses the cheapest visible 24/27/28-month plan for each competitor."
-                "</div>",
-                unsafe_allow_html=True,
-            )
-
             st.markdown("#### Event comparison table")
-            st.caption("This table shows which plan was chosen for each competitor at each event.")
-
             event_table = event_df[
                 [
                     "Event",
+                    "Target event date",
                     "Competitor",
                     "Plan name",
                     "Type",
@@ -713,8 +784,10 @@ with tab6:
                 ]
             ].copy()
 
+            event_table["Target event date"] = event_table["Target event date"].map(fmt_date)
             event_table["Price per month"] = event_table["Price per month"].map(fmt_currency)
             event_table["Total price"] = event_table["Total price"].map(fmt_currency)
+            event_table["Date"] = event_table["Date"].map(fmt_date)
 
             st.dataframe(
                 event_table.sort_values(["Event", "Competitor"]),
@@ -727,9 +800,13 @@ with tab6:
 # -----------------------------
 with tab7:
     st.subheader("Raw filtered export")
-    st.dataframe(filtered, use_container_width=True)
+    raw_out = filtered.copy()
+    if "Date" in raw_out.columns:
+        raw_out["Date"] = raw_out["Date"].map(fmt_date)
 
-    csv_data = filtered.to_csv(index=False).encode("utf-8")
+    st.dataframe(raw_out, use_container_width=True)
+
+    csv_data = raw_out.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="Download filtered data as CSV",
         data=csv_data,
