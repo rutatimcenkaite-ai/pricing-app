@@ -61,20 +61,49 @@ if df.empty:
     st.stop()
 
 # -----------------------------
-# Sidebar filters in requested order
+# Sidebar
 # -----------------------------
 st.sidebar.header("Filters")
 
+if st.sidebar.button("Reset filters"):
+    st.rerun()
+
 filtered = df.copy()
 
-# 1. Start date / 2. End date
+# -----------------------------
+# Primary filters
+# -----------------------------
+st.sidebar.subheader("Primary")
+
 if "Date" in filtered.columns and filtered["Date"].notna().any():
     min_date = filtered["Date"].min().date()
     max_date = filtered["Date"].max().date()
 
+    quick_view = st.sidebar.radio(
+        "Quick date view",
+        ["Custom", "Last 30 days", "Last 90 days", "Last 180 days", "All data"],
+        index=0,
+    )
+
+    if quick_view == "All data":
+        start_default = min_date
+        end_default = max_date
+    elif quick_view == "Last 30 days":
+        start_default = max(min_date, max_date - pd.Timedelta(days=30))
+        end_default = max_date
+    elif quick_view == "Last 90 days":
+        start_default = max(min_date, max_date - pd.Timedelta(days=90))
+        end_default = max_date
+    elif quick_view == "Last 180 days":
+        start_default = max(min_date, max_date - pd.Timedelta(days=180))
+        end_default = max_date
+    else:
+        start_default = min_date
+        end_default = max_date
+
     start_date = st.sidebar.date_input(
         "Start date",
-        value=min_date,
+        value=start_default,
         min_value=min_date,
         max_value=max_date,
         key="start_date",
@@ -82,7 +111,7 @@ if "Date" in filtered.columns and filtered["Date"].notna().any():
 
     end_date = st.sidebar.date_input(
         "End date",
-        value=max_date,
+        value=end_default,
         min_value=min_date,
         max_value=max_date,
         key="end_date",
@@ -100,7 +129,6 @@ if filtered.empty:
     st.warning("No rows match the selected date range.")
     st.stop()
 
-# 3. Competitor
 competitor_options = (
     sorted(filtered["Competitor"].dropna().astype(str).unique().tolist())
     if "Competitor" in filtered.columns
@@ -109,7 +137,7 @@ competitor_options = (
 selected_competitors = st.sidebar.multiselect(
     "Competitor",
     competitor_options,
-    default=competitor_options,
+    default=competitor_options[:5] if len(competitor_options) > 5 else competitor_options,
 )
 
 if selected_competitors and "Competitor" in filtered.columns:
@@ -119,83 +147,84 @@ if filtered.empty:
     st.warning("No rows match the selected competitors.")
     st.stop()
 
-# 4. Length
-length_options = []
-if "Length (in months)" in filtered.columns:
-    length_options = sorted(
-        [int(x) for x in filtered["Length (in months)"].dropna().unique().tolist()]
+# -----------------------------
+# Advanced filters
+# -----------------------------
+with st.sidebar.expander("Advanced filters", expanded=False):
+    length_options = []
+    if "Length (in months)" in filtered.columns:
+        length_options = sorted(
+            [int(x) for x in filtered["Length (in months)"].dropna().unique().tolist()]
+        )
+
+    selected_lengths = st.multiselect(
+        "Length (in months)",
+        length_options,
+        default=length_options,
     )
 
-selected_lengths = st.sidebar.multiselect(
-    "Length (in months)",
-    length_options,
-    default=length_options,
-)
+    temp_filtered = filtered.copy()
+    if selected_lengths and "Length (in months)" in temp_filtered.columns:
+        temp_filtered = temp_filtered[
+            temp_filtered["Length (in months)"].fillna(-1).astype(int).isin(selected_lengths)
+        ]
 
+    channel_options = (
+        sorted(temp_filtered["Channel"].dropna().astype(str).unique().tolist())
+        if "Channel" in temp_filtered.columns
+        else []
+    )
+    selected_channels = st.multiselect(
+        "Channel",
+        channel_options,
+        default=channel_options,
+    )
+
+    if selected_channels and "Channel" in temp_filtered.columns:
+        temp_filtered = temp_filtered[temp_filtered["Channel"].astype(str).isin(selected_channels)]
+
+    type_options = (
+        sorted(temp_filtered["Type"].dropna().astype(str).unique().tolist())
+        if "Type" in temp_filtered.columns
+        else []
+    )
+    selected_types = st.multiselect(
+        "Type",
+        type_options,
+        default=type_options,
+    )
+
+    if selected_types and "Type" in temp_filtered.columns:
+        temp_filtered = temp_filtered[temp_filtered["Type"].astype(str).isin(selected_types)]
+
+    plan_options = (
+        sorted(temp_filtered["Plan name"].dropna().astype(str).unique().tolist())
+        if "Plan name" in temp_filtered.columns
+        else []
+    )
+    selected_plan_names = st.multiselect(
+        "Plan name",
+        plan_options,
+        default=plan_options,
+    )
+
+# Apply advanced filters
 if selected_lengths and "Length (in months)" in filtered.columns:
     filtered = filtered[
         filtered["Length (in months)"].fillna(-1).astype(int).isin(selected_lengths)
     ]
 
-if filtered.empty:
-    st.warning("No rows match the selected lengths.")
-    st.stop()
-
-# 5. Channel
-channel_options = (
-    sorted(filtered["Channel"].dropna().astype(str).unique().tolist())
-    if "Channel" in filtered.columns
-    else []
-)
-selected_channels = st.sidebar.multiselect(
-    "Channel",
-    channel_options,
-    default=channel_options,
-)
-
 if selected_channels and "Channel" in filtered.columns:
     filtered = filtered[filtered["Channel"].astype(str).isin(selected_channels)]
 
-if filtered.empty:
-    st.warning("No rows match the selected channels.")
-    st.stop()
-
-# 6. Type
-type_options = (
-    sorted(filtered["Type"].dropna().astype(str).unique().tolist())
-    if "Type" in filtered.columns
-    else []
-)
-selected_types = st.sidebar.multiselect(
-    "Type",
-    type_options,
-    default=type_options,
-)
-
 if selected_types and "Type" in filtered.columns:
     filtered = filtered[filtered["Type"].astype(str).isin(selected_types)]
-
-if filtered.empty:
-    st.warning("No rows match the selected types.")
-    st.stop()
-
-# 7. Plan name
-plan_options = (
-    sorted(filtered["Plan name"].dropna().astype(str).unique().tolist())
-    if "Plan name" in filtered.columns
-    else []
-)
-selected_plan_names = st.sidebar.multiselect(
-    "Plan name",
-    plan_options,
-    default=plan_options,
-)
 
 if selected_plan_names and "Plan name" in filtered.columns:
     filtered = filtered[filtered["Plan name"].astype(str).isin(selected_plan_names)]
 
 if filtered.empty:
-    st.warning("No rows match the selected plan names.")
+    st.warning("No rows match the current filters.")
     st.stop()
 
 # -----------------------------
@@ -249,14 +278,92 @@ with col4:
 # -----------------------------
 # Tabs
 # -----------------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["All price points", "Competitor comparison", "Trend lines", "Timeline", "Raw data"]
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    ["Insights", "All price points", "Competitor comparison", "Trend lines", "Timeline", "Raw data"]
 )
 
 # -----------------------------
-# Tab 1: All price points
+# Tab 1: Insights
 # -----------------------------
 with tab1:
+    st.subheader("Insights")
+
+    latest_date = filtered["Date"].max() if "Date" in filtered.columns and filtered["Date"].notna().any() else None
+
+    if latest_date is not None:
+        latest_rows = filtered[filtered["Date"] == latest_date].copy()
+    else:
+        latest_rows = filtered.copy()
+
+    insight_col1, insight_col2 = st.columns(2)
+
+    with insight_col1:
+        st.markdown("#### Current snapshot")
+
+        if not latest_rows.empty:
+            cheapest_now = latest_rows.loc[latest_rows["Price per month"].idxmin()]
+            expensive_now = latest_rows.loc[latest_rows["Price per month"].idxmax()]
+
+            st.write(
+                f"**Cheapest visible offer:** {cheapest_now['Competitor']} — "
+                f"{cheapest_now.get('Plan name', 'Unknown')} at **${cheapest_now['Price per month']:.2f}/month**"
+            )
+            st.write(
+                f"**Most expensive visible offer:** {expensive_now['Competitor']} — "
+                f"{expensive_now.get('Plan name', 'Unknown')} at **${expensive_now['Price per month']:.2f}/month**"
+            )
+
+        range_summary = (
+            filtered.groupby("Competitor", as_index=False)["Price per month"]
+            .agg(["min", "max", "median", "count"])
+            .reset_index()
+        )
+        range_summary.columns = ["Competitor", "Min", "Max", "Median", "Price points"]
+        st.dataframe(range_summary.sort_values("Min"), use_container_width=True, hide_index=True)
+
+    with insight_col2:
+        st.markdown("#### Change activity")
+
+        if "Date" in filtered.columns and filtered["Date"].notna().any():
+            trend_activity = (
+                filtered.sort_values("Date")
+                .groupby(["Competitor", "Trend label"])["Price per month"]
+                .nunique()
+                .reset_index(name="Distinct prices")
+            )
+
+            change_summary = (
+                trend_activity.groupby("Competitor", as_index=False)["Distinct prices"]
+                .sum()
+                .sort_values("Distinct prices", ascending=False)
+            )
+
+            if not change_summary.empty:
+                most_active = change_summary.iloc[0]
+                st.write(
+                    f"**Most pricing movement:** {most_active['Competitor']} "
+                    f"with **{int(most_active['Distinct prices'])}** distinct visible price points."
+                )
+
+                st.dataframe(change_summary, use_container_width=True, hide_index=True)
+
+        cheapest_by_length = None
+        if "Length (in months)" in filtered.columns:
+            cheapest_by_length = (
+                filtered.dropna(subset=["Length (in months)", "Price per month"])
+                .sort_values(["Length (in months)", "Price per month"])
+                .groupby("Length (in months)", as_index=False)
+                .first()[["Length (in months)", "Competitor", "Plan name", "Price per month"]]
+            )
+
+        if cheapest_by_length is not None and not cheapest_by_length.empty:
+            st.markdown("#### Cheapest offer by length")
+            st.dataframe(cheapest_by_length, use_container_width=True, hide_index=True)
+
+# -----------------------------
+# Tab 2: All price points
+# -----------------------------
+with tab2:
     st.subheader("All visible price points by competitor")
 
     st.vega_lite_chart(
@@ -275,6 +382,7 @@ with tab1:
                     "field": "Price per month",
                     "type": "quantitative",
                     "title": "Price per month",
+                    "axis": {"format": "$.2f"},
                 },
                 "color": {
                     "field": "Competitor",
@@ -288,8 +396,8 @@ with tab1:
                     {"field": "Type", "type": "nominal"},
                     {"field": "Plan name", "type": "nominal"},
                     {"field": "Length (in months)", "type": "quantitative"},
-                    {"field": "Price per month", "type": "quantitative"},
-                    {"field": "Total price", "type": "quantitative"},
+                    {"field": "Price per month", "type": "quantitative", "format": "$.2f"},
+                    {"field": "Total price", "type": "quantitative", "format": "$.2f"},
                 ],
             },
             "height": 500,
@@ -298,9 +406,9 @@ with tab1:
     )
 
 # -----------------------------
-# Tab 2: Competitor comparison
+# Tab 3: Competitor comparison
 # -----------------------------
-with tab2:
+with tab3:
     st.subheader("Competitor comparison summary")
 
     summary = (
@@ -316,12 +424,12 @@ with tab2:
         .sort_values("min_price")
     )
 
-    st.dataframe(summary, use_container_width=True)
+    st.dataframe(summary, use_container_width=True, hide_index=True)
 
 # -----------------------------
-# Tab 3: Trend lines
+# Tab 4: Trend lines
 # -----------------------------
-with tab3:
+with tab4:
     st.subheader("Pricing trend lines over time")
 
     metric_choice = st.selectbox(
@@ -338,10 +446,11 @@ with tab3:
     else:
         available_labels = sorted(trend_df["Trend label"].dropna().astype(str).unique().tolist())
 
+        default_lines = available_labels[:10] if len(available_labels) > 10 else available_labels
         selected_line_labels = st.multiselect(
             "Choose lines to display",
             available_labels,
-            default=available_labels,
+            default=default_lines,
         )
 
         if selected_line_labels:
@@ -368,6 +477,7 @@ with tab3:
                 "field": metric_choice,
                 "type": "quantitative",
                 "title": metric_choice,
+                "axis": {"format": "$.2f"},
             },
             "tooltip": [
                 {"field": "Date", "type": "temporal", "format": "%Y-%m-%d"},
@@ -376,7 +486,7 @@ with tab3:
                 {"field": "Type", "type": "nominal"},
                 {"field": "Plan name", "type": "nominal"},
                 {"field": "Length (in months)", "type": "quantitative"},
-                {"field": metric_choice, "type": "quantitative"},
+                {"field": metric_choice, "type": "quantitative", "format": "$.2f"},
             ],
         }
 
@@ -421,9 +531,9 @@ with tab3:
                 )
 
 # -----------------------------
-# Tab 4: Timeline
+# Tab 5: Timeline
 # -----------------------------
-with tab4:
+with tab5:
     st.subheader("All visible price points over time")
 
     timeline_df = filtered.dropna(subset=["Date", "Price per month"]).copy()
@@ -451,6 +561,7 @@ with tab4:
                         "field": "Price per month",
                         "type": "quantitative",
                         "title": "Price per month",
+                        "axis": {"format": "$.2f"},
                     },
                     "color": {"field": "Competitor", "type": "nominal"},
                     "tooltip": [
@@ -460,8 +571,8 @@ with tab4:
                         {"field": "Type", "type": "nominal"},
                         {"field": "Plan name", "type": "nominal"},
                         {"field": "Length (in months)", "type": "quantitative"},
-                        {"field": "Price per month", "type": "quantitative"},
-                        {"field": "Total price", "type": "quantitative"},
+                        {"field": "Price per month", "type": "quantitative", "format": "$.2f"},
+                        {"field": "Total price", "type": "quantitative", "format": "$.2f"},
                     ],
                 },
                 "height": 500,
@@ -470,9 +581,9 @@ with tab4:
         )
 
 # -----------------------------
-# Tab 5: Raw data
+# Tab 6: Raw data
 # -----------------------------
-with tab5:
+with tab6:
     st.subheader("Raw filtered export")
     st.dataframe(filtered, use_container_width=True)
 
@@ -484,9 +595,6 @@ with tab5:
         mime="text/csv",
     )
 
-# -----------------------------
-# Data sanity note
-# -----------------------------
 with st.expander("Check column meaning"):
     st.write(
         "This app uses the Excel columns exactly as they appear in the Main sheet. "
